@@ -1,0 +1,29 @@
+dsh-crosstalk — promo narration
+================================
+~1 minute · read aloud, energetic · one slide per block (≈7-8s each)
+Controls: → / Space = next slide · ← = back · A = auto-advance (7.5s) · H = help
+
+
+[Slide 1 — Hook]
+Every developer runs multiple DSH sessions — one per repo. What if they could just... talk to each other?
+
+[Slide 2 — What it is]
+This is dsh-crosstalk. Every session gets a human name — dsh-cowork-amber — and you can list every live session and message it by name. No daemon. Just heartbeat files.
+
+[Slide 3 — The problem]
+Right now, your sessions are islands. A session can only talk to its own subagents. Two sessions in two repos? You're copy-pasting between terminals like it's 2015.
+
+[Slide 4 — The demo]
+One command, and over it goes. The message lands as a clearly-labeled turn — message from session dsh-cowork-amber — and the idle session wakes up to handle it.
+
+[Slide 5 — The whole API]
+Two commands. That's the whole API. list_agents peers shows you who's alive. send_message delivers — and replying is just sending back, because the sender's name rides along on every message.
+
+[Slide 6 — Trust]
+Trust is built in. Same-user only — no network. Every turn is written to the append-only log with its provenance. And there's an allowlist mode, if you want it locked down.
+
+[Slide 7 — Install]
+Getting started is one command. dsh plugin, add github:Jesse-njx/dsh-crosstalk — straight from GitHub, no npm step.
+
+[Slide 8 — Close]
+Multi-session workflows just got a lot more interesting. Your sessions are about to get chatty. Star it — and go make your sessions talk.

@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-crosstalk — cross-session messaging for DSH</title>
+<style>
+  /* ── tokens ─────────────────────────────────────────────────────────── */
+  :root {
+    --ink:      #0B0E14;   /* stage background — deep terminal blue-black  */
+    --panel:    #121826;   /* terminal pane surface                        */
+    --panel2:   #0E1420;   /* recessed surface                             */
+    --text:     #E8ECF3;   /* primary text                                 */
+    --muted:    #8B94A7;   /* secondary text                               */
+    --line:     rgba(139, 148, 167, 0.28);
+    --amber:    #F5B84C;   /* the sender's voice / accent                   */
+    --cyan:     #5CC8E8;   /* the receiver's voice                          */
+    --green:    #4ADE80;   /* success / install                             */
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+            "DejaVu Sans Mono", monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    background: #05070B;
+    font-family: var(--mono);
+    color: var(--text);
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+  }
+
+  /* ── the 1280×720 stage, scaled to fit any window ──────────────────── */
+  #stage {
+    position: relative;
+    width: 1280px;
+    height: 720px;
+    transform-origin: center center;
+    background:
+      radial-gradient(1200px 600px at 75% -10%, rgba(92, 200, 232, 0.07), transparent 60%),
+      radial-gradient(1000px 500px at 15% 110%, rgba(245, 184, 76, 0.06), transparent 60%),
+      var(--ink);
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── chrome ─────────────────────────────────────────────────────────── */
+  .topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 28px;
+    border-bottom: 1px solid var(--line);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--text);
+    z-index: 5;
+  }
+  .topbar .tag {
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .topbar .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 10px rgba(245, 184, 76, 0.7);
+  }
+
+  #dots {
+    position: absolute;
+    bottom: 22px; left: 0; right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    z-index: 6;
+  }
+  #dots button {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 1px solid var(--muted);
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    transition: background 180ms ease, transform 180ms ease, border-color 180ms ease;
+  }
+  #dots button:hover { border-color: var(--text); transform: scale(1.25); }
+  #dots button.on { background: var(--amber); border-color: var(--amber); }
+  #dots button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+  /* ── slides ─────────────────────────────────────────────────────────── */
+  main { position: absolute; inset: 56px 0 0; z-index: 1; }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    padding: 64px 88px 84px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 22px;
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 320ms ease, transform 320ms ease;
+    pointer-events: none;
+  }
+  .slide.active { opacity: 1; transform: none; pointer-events: auto; }
+
+  .eyebrow {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  .eyebrow.cyan { color: var(--cyan); }
+
+  .h1 {
+    font-size: 62px;
+    line-height: 1.06;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .h1 .accent { color: var(--amber); }
+  .h1 .accent.cyan { color: var(--cyan); }
+  .h1.small { font-size: 48px; }
+
+  .sub {
+    font-size: 21px;
+    line-height: 1.45;
+    color: var(--muted);
+    max-width: 860px;
+  }
+  .sub b { color: var(--text); font-weight: 600; }
+  .sub code {
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 18px;
+    color: var(--text);
+  }
+
+  /* ── slide 2: names + features ──────────────────────────────────────── */
+  .chips { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 10px; }
+  .chip {
+    font-size: 19px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+  }
+  .chip .sep { color: var(--muted); font-weight: 400; }
+  .chip.amber { border-color: rgba(245, 184, 76, 0.45); }
+  .chip.cyan  { border-color: rgba(92, 200, 232, 0.45); }
+
+  .feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 10px; }
+  .feat {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .feat .k { font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--amber); font-weight: 700; }
+  .feat .v { font-size: 17px; line-height: 1.4; color: var(--text); }
+  .feat .v code {
+    display: block;
+    margin-top: 8px;
+    font-size: 15px;
+    color: var(--cyan);
+    background: var(--panel2);
+    border-radius: 6px;
+    padding: 6px 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── slide 3: the pain ──────────────────────────────────────────────── */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 8px; }
+  .box {
+    border-radius: 14px;
+    padding: 22px 24px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    font-size: 17px;
+    line-height: 1.5;
+  }
+  .box .k { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; }
+  .box.bad  { border-color: rgba(232, 92, 92, 0.4); }
+  .box.bad .k { color: #E85C5C; }
+  .box.good { border-color: rgba(74, 222, 128, 0.4); }
+  .box.good .k { color: var(--green); }
+  .box .flow { color: var(--muted); }
+  .box .flow b { color: var(--text); font-weight: 600; }
+  .box.good .flow b { color: var(--green); }
+
+  /* ── slide 4: the demo ──────────────────────────────────────────────── */
+  .demo { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 8px; }
+  .pane {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 330px;
+  }
+  .pane-bar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel2);
+  }
+  .pane-bar i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .pane-bar i:nth-child(1) { background: #E85C5C; }
+  .pane-bar i:nth-child(2) { background: #E8B84C; }
+  .pane-bar i:nth-child(3) { background: #4ADE80; }
+  .pane-bar span {
+    margin-left: 8px;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pane-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; flex: 1; font-size: 16px; line-height: 1.45; }
+  .line { opacity: 0; transform: translateY(6px); }
+  .line.dim  { color: var(--muted); }
+  .line.text { color: var(--text); }
+  .line.cmd  { color: var(--text); }
+  .line.cmd .pmt { color: var(--amber); font-weight: 700; }
+  .line.ok   { color: var(--green); }
+  .line.incoming { color: var(--cyan); }
+
+  .inbox-card {
+    border: 1px solid rgba(245, 184, 76, 0.5);
+    border-left: 4px solid var(--amber);
+    background: var(--panel2);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 14px;
+    line-height: 1.5;
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  .inbox-card .from { color: var(--amber); font-weight: 700; font-size: 13px; }
+  .inbox-card .body { color: var(--text); margin-top: 4px; }
+
+  /* demo choreography — plays while slide 4 is active */
+  .playing .line.dim:nth-child(1) { animation: rise 400ms 200ms both; }
+  .playing .line.dim:nth-child(2) { animation: rise 400ms 900ms both; }
+  .playing .line.dim:nth-child(3) { animation: rise 400ms 1200ms both; }
+  .playing .line.cmd               { animation: rise 400ms 1700ms both; }
+  .playing .line.ok                { animation: rise 400ms 2800ms both; }
+  .playing .inbox-card             { animation: slide-in 450ms 3400ms both; }
+  .playing .pane.receiver .line.incoming { animation: rise 400ms 4400ms both; }
+  .playing .pane.sender .line.incoming   { animation: rise 400ms 5600ms both; }
+
+  @keyframes rise      { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes slide-in  { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+
+  /* ── slide 5: commands ──────────────────────────────────────────────── */
+  .cmd-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 980px;
+  }
+  .cmd-card .line {
+    font-size: 22px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cmd-card .line .pmt { color: var(--amber); font-weight: 700; }
+  .cmd-card .line.arg { color: var(--cyan); }
+  .cmd-card .note { font-size: 15px; color: var(--muted); }
+  .cmd-card .note b { color: var(--text); font-weight: 600; }
+
+  /* ── slide 6: trust ─────────────────────────────────────────────────── */
+  .trust { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 8px; }
+  .trust .feat .k { color: var(--cyan); }
+  .trust .feat .v code { color: var(--amber); }
+
+  /* ── slide 7: install ───────────────────────────────────────────────── */
+  .install-block {
+    background: var(--panel);
+    border: 1px solid rgba(74, 222, 128, 0.45);
+    border-radius: 14px;
+    padding: 30px 34px;
+    font-size: 27px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 1100px;
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.08), 0 18px 60px rgba(0, 0, 0, 0.45);
+  }
+  .install-block .pmt { color: var(--green); font-weight: 700; }
+  .install-block .pkg { color: var(--amber); font-weight: 700; }
+
+  /* ── slide 8: close ─────────────────────────────────────────────────── */
+  .close-url {
+    font-size: 24px;
+    color: var(--cyan);
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 22px;
+    display: inline-block;
+    align-self: flex-start;
+  }
+
+  /* ── help overlay ───────────────────────────────────────────────────── */
+  #help {
+    position: absolute;
+    inset: 56px 0 0;
+    background: rgba(5, 7, 11, 0.88);
+    backdrop-filter: blur(3px);
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 18px;
+    z-index: 20;
+    font-size: 20px;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+  #help.visible { display: flex; }
+  #help b { color: var(--text); }
+  #help .keys { color: var(--amber); font-weight: 700; }
+
+  /* ── reduced motion: instant transitions, static final demo state ───── */
+  @media (prefers-reduced-motion: reduce) {
+    .slide { transition: none; }
+    .line, .inbox-card { animation: none !important; opacity: 1 !important; transform: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <header class="topbar">
+    <span class="dot"></span>
+    dsh-crosstalk
+    <span class="tag">CROSS-SESSION MESSAGING FOR DEEPSEEK HARNESS</span>
+  </header>
+
+  <main>
+    <!-- 1 · hook -->
+    <section class="slide active" data-slide="1">
+      <p class="eyebrow">DSH · CROSS-SESSION MESSAGING</p>
+      <h1 class="h1">Two sessions.<br>One machine.<br><span class="accent">Now they talk.</span></h1>
+      <p class="sub">dsh-crosstalk — Claude Code-style messaging,<br>built into the tools you already use.</p>
+    </section>
+
+    <!-- 2 · what -->
+    <section class="slide" data-slide="2">
+      <p class="eyebrow">WHAT IT IS</p>
+      <h1 class="h1 small">Every session gets a name.</h1>
+      <div class="chips">
+        <span class="chip amber">dsh-cowork-amber<span class="sep"> · idle</span></span>
+        <span class="chip cyan">dsh-memory-azure<span class="sep"> · running</span></span>
+        <span class="chip">dsh-polyglot-coral<span class="sep"> · idle</span></span>
+      </div>
+      <div class="feats">
+        <div class="feat"><span class="k">See everyone</span><span class="v">Any live session on the machine, one list.<code>list_agents peers</code></span></div>
+        <div class="feat"><span class="k">Message by name</span><span class="v">Address a session, not a process id.<code>send_message to="dsh-memory-azure"</code></span></div>
+        <div class="feat"><span class="k">No daemon</span><span class="v">Heartbeat files + atomic writes. That's the whole registry.<code>~/.dsh/crosstalk/</code></span></div>
+      </div>
+    </section>
+
+    <!-- 3 · why -->
+    <section class="slide" data-slide="3">
+      <p class="eyebrow">THE PROBLEM</p>
+      <h1 class="h1 small">Your sessions are <span class="accent">islands.</span></h1>
+      <div class="compare">
+        <div class="box bad">
+          <p class="k">Today</p>
+          <p class="flow">A session can only talk to <b>its own subagents</b>.<br>Two sessions in two repos?</p>
+          <p class="flow" style="margin-top:10px">You copy-paste between terminals.</p>
+        </div>
+        <div class="box good">
+          <p class="k">With dsh-crosstalk</p>
+          <p class="flow">Any session ↔ any session.<br><b>list</b> them, <b>message</b> them, <b>reply</b> by name.</p>
+          <p class="flow" style="margin-top:10px">One repo, one session — they coordinate.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 · demo -->
+    <section class="slide" data-slide="4">
+      <p class="eyebrow">SEE IT</p>
+      <h1 class="h1 small">A message. Across sessions.</h1>
+      <div class="demo">
+        <div class="pane sender">
+          <div class="pane-bar"><i></i><i></i><i></i><span>dsh-cowork-amber — ~/work/dsh-cowork</span></div>
+          <div class="pane-body">
+            <div class="line dim">$ list_agents peers</div>
+            <div class="line dim">&nbsp;&nbsp;dsh-cowork-amber&nbsp;[idle]&nbsp; — ~/work/dsh-cowork</div>
+            <div class="line dim">&nbsp;&nbsp;dsh-memory-azure&nbsp;&nbsp;[idle] — ~/work/dsh-memory</div>
+            <div class="line cmd"><span class="pmt">$ </span>send_message to="dsh-memory-azure"<br>&nbsp;&nbsp;&nbsp;&nbsp;message="round-trip check — copy?"</div>
+            <div class="line ok">✓ message queued for dsh-memory-azure</div>
+            <div class="line incoming">← "loud and clear. ping me at standup."</div>
+          </div>
+        </div>
+        <div class="pane receiver">
+          <div class="pane-bar"><i></i><i></i><i></i><span>dsh-memory-azure — ~/work/dsh-memory</span></div>
+          <div class="pane-body">
+            <div class="line dim">… idle — watching ~/.dsh/crosstalk/inbox/</div>
+            <div class="inbox-card">
+              <div class="from">message from session dsh-cowork-amber (~/work/dsh-cowork)</div>
+              <div class="body">round-trip check — copy?</div>
+            </div>
+            <div class="line incoming">Reply: send_message to="dsh-cowork-amber" …</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5 · commands -->
+    <section class="slide" data-slide="5">
+      <p class="eyebrow">THE WHOLE API</p>
+      <h1 class="h1 small">Two commands.</h1>
+      <div class="cmd-card">
+        <div class="line"><span class="pmt">$ </span>list_agents <span class="arg">peers</span></div>
+        <div class="note">Who's alive, what they're doing, where they live — <b>name · status · cwd · last activity</b>.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="line"><span class="pmt">$ </span>send_message <span class="arg">to="dsh-memory-azure"</span> <span class="arg">message="…"</span></div>
+        <div class="note">Delivered as a <b>labeled turn</b>. Idle session? It <b>wakes up</b>. Busy? Next turn boundary.</div>
+      </div>
+      <p class="sub" style="margin-top:6px">Replying is just <code>send_message</code> back — the sender's name rides along on every message.</p>
+    </section>
+
+    <!-- 6 · trust -->
+    <section class="slide" data-slide="6">
+      <p class="eyebrow cyan">TRUST, BY CONSTRUCTION</p>
+      <h1 class="h1 small">Peer requests.<br>Not user orders.</h1>
+      <div class="trust">
+        <div class="feat"><span class="k">Same-user only</span><span class="v">No network, no daemon, no daemon ports. OS-uid checked both ways.<code>accept: same-user</code></span></div>
+        <div class="feat"><span class="k">Auditable</span><span class="v">Every turn is labeled and written to the append-only log with its provenance.<code>source: crosstalk</code></span></div>
+        <div class="feat"><span class="k">Allowlist mode</span><span class="v">Lock inbound to named sessions or cwd globs.<code>mode: allowlist</code></span></div>
+      </div>
+    </section>
+
+    <!-- 7 · install -->
+    <section class="slide" data-slide="7">
+      <p class="eyebrow">INSTALL</p>
+      <h1 class="h1 small">One command.</h1>
+      <div class="install-block"><span class="pmt">$ </span>dsh plugin --profile web add <span class="pkg">github:Jesse-njx/dsh-crosstalk</span></div>
+      <p class="sub">Straight from GitHub — no npm step. Add it to every profile that should join the conversation.</p>
+    </section>
+
+    <!-- 8 · close -->
+    <section class="slide" data-slide="8">
+      <p class="eyebrow">OPEN SOURCE · MIT</p>
+      <h1 class="h1">Your sessions are<br>about to get <span class="accent">chatty.</span></h1>
+      <span class="close-url">github.com/Jesse-njx/dsh-crosstalk</span>
+    </section>
+  </main>
+
+  <nav id="dots" aria-label="Slides"></nav>
+
+  <div id="help" role="dialog" aria-label="Controls">
+    <p><span class="keys">→ / Space / PgDn</span> — next slide&nbsp;&nbsp;·&nbsp;&nbsp;<span class="keys">← / PgUp</span> — previous</p>
+    <p><span class="keys">Home / End</span> — first / last&nbsp;&nbsp;·&nbsp;&nbsp;<span class="keys">A</span> — auto-advance (7.5s)&nbsp;&nbsp;·&nbsp;&nbsp;<span class="keys">H</span> — hide this</p>
+    <p>Record at 1280×720 (16:9). Narration timing: <b>promo/narration.txt</b>.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var STAGE = document.getElementById('stage');
+  var SLIDES = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var DOTS = document.getElementById('dots');
+  var HELP = document.getElementById('help');
+  var AUTO_MS = 7500;
+  var current = 0;
+  var autoOn = false;
+  var autoTimer = null;
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* dots */
+  SLIDES.forEach(function (_, i) {
+    var b = document.createElement('button');
+    b.setAttribute('aria-label', 'Slide ' + (i + 1));
+    b.addEventListener('click', function () { go(i); });
+    DOTS.appendChild(b);
+  });
+
+  function paint() {
+    SLIDES.forEach(function (s, i) {
+      s.classList.toggle('active', i === current);
+      DOTS.children[i].classList.toggle('on', i === current);
+    });
+    /* restart the demo choreography each time slide 4 activates */
+    if (current === 3 && !reduced) {
+      var demo = SLIDES[3];
+      demo.classList.remove('playing');
+      void demo.offsetWidth;
+      demo.classList.add('playing');
+    }
+    armAuto();
+  }
+
+  function go(i) {
+    current = Math.max(0, Math.min(SLIDES.length - 1, i));
+    paint();
+  }
+  function step(d) { go(current + d); }
+
+  function armAuto() {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    if (!autoOn) return;
+    autoTimer = setTimeout(function () { step(1); }, AUTO_MS);
+  }
+
+  /* keyboard */
+  document.addEventListener('keydown', function (e) {
+    switch (e.key) {
+      case 'ArrowRight': case ' ': case 'PageDown': case 'Enter':
+        e.preventDefault(); step(1); break;
+      case 'ArrowLeft': case 'PageUp':
+        e.preventDefault(); step(-1); break;
+      case 'Home': e.preventDefault(); go(0); break;
+      case 'End': e.preventDefault(); go(SLIDES.length - 1); break;
+      case 'a': case 'A':
+        autoOn = !autoOn;
+        armAuto();
+        break;
+      case 'h': case 'H':
+        HELP.classList.toggle('visible');
+        break;
+    }
+  });
+
+  /* click: right half of the (scaled) stage next, left half previous */
+  STAGE.addEventListener('click', function (e) {
+    if (e.target.closest('#dots') || e.target.closest('#help')) return;
+    var rect = STAGE.getBoundingClientRect();
+    step(e.clientX > rect.left + rect.width / 2 ? 1 : -1);
+  });
+
+  /* scale the 1280×720 stage to the window */
+  function rescale() {
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    STAGE.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', rescale);
+  rescale();
+
+  /* deep-link: #s4 opens slide 4 (also used by the screenshot loop) */
+  var m = /#s(\d+)/.exec(location.hash);
+  if (m) go(Math.max(0, Math.min(SLIDES.length - 1, Number(m[1]) - 1)));
+  else paint();
+})();
+</script>
+</body>
+</html>
